@@ -179,7 +179,7 @@ app.post('/api/verify-link-payment', async (req, res) => {
       // Send Automated Receipt via Email
       const mailOptions = {
         from: process.env.EMAIL_USER || 'ayushsrivastavaind@gmail.com',
-        to: '2023041029@mmmut.ac.in', 
+        to: 'hrhabdn@gmail.com', 
         subject: `Payment Receipt: Optium-EV Terminal ${updatedSession.terminalId}`,
         html: `
           <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; max-width: 500px;">
