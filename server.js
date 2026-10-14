@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const Razorpay = require('razorpay'); 
 const crypto = require('crypto'); 
-// ADD THIS AT THE TOP (Below your other requires)
 const nodemailer = require('nodemailer');
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -18,16 +17,10 @@ const MONGO_URI = process.env.MONGODB_URI || 'mongodb+srv://ayushsrivastava:ayus
 mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB connected successfully'))
   .catch((err) => console.error('MongoDB connection error:', err));
-// Add this right above app.listen(port, ...)
-app.get('/api/charging-sessions', async (req, res) => {
-  try {
-    const sessions = await ChargingSession.find({}); // Fetch all records
-    res.status(200).json({ success: true, data: sessions });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-// 2. MongoDB Schema & Model for Storing Charging History / Bookings
+
+// ---------------------------------------------------------
+// 2. SCHEMA & MODELS (Must be defined BEFORE routes use them)
+// ---------------------------------------------------------
 const ChargingSessionSchema = new mongoose.Schema({
   terminalId: { type: Number, required: true },
   vehicleType: { type: Number, required: true },
@@ -44,6 +37,21 @@ const ChargingSessionSchema = new mongoose.Schema({
 
 const ChargingSession = mongoose.model('ChargingSession', ChargingSessionSchema);
 
+const vehicleSchema = new mongoose.Schema({
+  userEmail: { type: String, required: true },
+  label: { type: String, required: true }, // e.g., "Tata Nexon EV"
+  typeId: { type: Number, required: true }, // 1=Bike, 2=Car, 3=Bus
+  batteryCapacity: { type: Number, required: true }, // in kWh
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Vehicle = mongoose.model('Vehicle', vehicleSchema);
+
+
+// ---------------------------------------------------------
+// 3. EXTERNAL SERVICES INITIALIZATION
+// ---------------------------------------------------------
+
 // Map terminal IDs to their ThingsBoard Device Tokens
 const DEVICE_TOKENS = {
   1: process.env.TB_TOKEN_BAY1 || 'LER9rackcZb3NG7xCg2i',
@@ -51,30 +59,42 @@ const DEVICE_TOKENS = {
   3: process.env.TB_TOKEN_BAY3 || 'LER9rackcZb3NG7xCg2i',
 };
 
-// --- Initialize Razorpay ---
+// Initialize Razorpay
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_TnUkNJrG2f4Y5W', 
   key_secret: process.env.RAZORPAY_KEY_SECRET || 'HJN1qln1DseiwyjFJa04NSBI',
 });
-// ADD THIS BELOW YOUR RAZORPAY INITIALIZATION
+
+// Configure Nodemailer (Using Environment Variables for security on Render)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'ayushsrivastavaind@gmail.com',
-    pass: 'xmmfdkzxghncmlkn'
+    user: process.env.EMAIL_USER || 'ayushsrivastavaind@gmail.com',
+    pass: process.env.EMAIL_PASS || 'xmmfdkzxghncmlkn'
   }
 });
-// 3. Health check route
+
+
+// ---------------------------------------------------------
+// 4. API ROUTES
+// ---------------------------------------------------------
+
+// Health check route (Root URL)
 app.get('/', (req, res) => {
   res.send({ status: 'EV Charging Backend Online', database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected' });
 });
 
-// 4. Car Configuration & Booking Route (Existing route placeholder)
-app.post('/api/set-car-config', async (req, res) => {
-    // ... your existing code ...
+// Fetch all charging sessions
+app.get('/api/charging-sessions', async (req, res) => {
+  try {
+    const sessions = await ChargingSession.find({}); // Fetch all records
+    res.status(200).json({ success: true, data: sessions });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
-// 5. Query Recent Charging Sessions
+// Query Recent Charging Sessions (Limit 10)
 app.get('/api/sessions', async (req, res) => {
   try {
     const sessions = await ChargingSession.find().sort({ createdAt: -1 }).limit(10);
@@ -84,7 +104,7 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
-// --- UPDATED: Dynamic Razorpay Payment Link Generation Route ---
+// Dynamic Razorpay Payment Link Generation Route
 app.post('/api/create-payment-link', async (req, res) => {
   try {
     const { amount, terminalId, vehicleType, batteryCapacity, initialSoc } = req.body; 
@@ -128,9 +148,7 @@ app.post('/api/create-payment-link', async (req, res) => {
   }
 });
 
-// --- Manual Link Payment Settlement Route ---
-// Triggered when the user confirms completion inside the mobile app
-// --- Manual Link Payment Settlement Route (WITH EMAIL RECEIPT) ---
+// Manual Link Payment Settlement Route (WITH EMAIL RECEIPT)
 app.post('/api/verify-link-payment', async (req, res) => {
   try {
     const { linkId } = req.body;
@@ -160,8 +178,8 @@ app.post('/api/verify-link-payment', async (req, res) => {
     if (updatedSession) {
       // Send Automated Receipt via Email
       const mailOptions = {
-        from: 'ayushsrivastavaind@gmail.com',
-        to: 'ayushsrivastavaind@gmail.com', 
+        from: process.env.EMAIL_USER || 'ayushsrivastavaind@gmail.com',
+        to: '2023041029@mmmut.ac.in', 
         subject: `Payment Receipt: Optium-EV Terminal ${updatedSession.terminalId}`,
         html: `
           <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e2e8f0; max-width: 500px;">
@@ -191,18 +209,8 @@ app.post('/api/verify-link-payment', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-// --- Vehicle Schema ---
-const vehicleSchema = new mongoose.Schema({
-  userEmail: { type: String, required: true },
-  label: { type: String, required: true }, // e.g., "Tata Nexon EV"
-  typeId: { type: Number, required: true }, // 1=Bike, 2=Car, 3=Bus
-  batteryCapacity: { type: Number, required: true }, // in kWh
-  createdAt: { type: Date, default: Date.now }
-});
 
-const Vehicle = mongoose.model('Vehicle', vehicleSchema);
-
-// --- Fetch User Vehicles ---
+// Fetch User Vehicles
 app.get('/api/vehicles/:email', async (req, res) => {
   try {
     const vehicles = await Vehicle.find({ userEmail: req.params.email }).sort({ createdAt: -1 });
@@ -212,7 +220,7 @@ app.get('/api/vehicles/:email', async (req, res) => {
   }
 });
 
-// --- Add New Vehicle ---
+// Add New Vehicle
 app.post('/api/vehicles', async (req, res) => {
   try {
     const { userEmail, label, typeId, batteryCapacity } = req.body;
@@ -223,7 +231,8 @@ app.post('/api/vehicles', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-// --- Standard Razorpay Order Verification Route ---
+
+// Standard Razorpay Order Verification Route
 app.post('/api/verify-payment', async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
@@ -250,6 +259,11 @@ app.post('/api/verify-payment', async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// Car Configuration & Booking Route (Placeholder)
+app.post('/api/set-car-config', async (req, res) => {
+    // ... your existing code ...
 });
 
 app.listen(PORT, () => {
